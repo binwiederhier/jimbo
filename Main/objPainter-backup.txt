@@ -1,0 +1,284 @@
+unit objPainter;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Classes, Graphics,
+
+  // Eigene Komponenten
+  objJimbo;
+
+type
+  TPainter = class
+  private
+    FCanvas: TCanvas; { Referenz auf TForm.Canvas }
+    FMap: TBitmap; { *nur* Hintergrund }
+    FMapShops: TBitmap; { Map mit Shops, außer aktivem Shop }
+
+    FView: TBitmap;
+
+    // Kartengroesse
+    FWidth: integer;
+    FHeight: integer;
+
+    // angezeigter Ausschnitt
+    FRectCanvas: TRect; { Ausschnitt auf dem Formular ohne Sidebar, [218,0,800,600] }
+    FRectMap: TRect; { Ausschnitt der Karte, RectMap muss genauso groß sein wie RectCanvas }
+
+    // Verschieben oder Drehen
+    {FShopMove: TShop;}
+    FShopMoveID: integer;
+    FShopHighlightID: integer;
+
+    procedure setRectMap(ARect: TRect);
+    procedure setMap(Map: TBitmap);
+
+    procedure updateMapShops;
+    procedure paintShop(Relative: Boolean; const ACanvas: TCanvas; Shop: TShop);
+    function getMidColor(Color1, Color2: TColor; perCent: integer): TColor;
+  public
+
+    Project: ^TJimbo; // Anders machen!
+
+    constructor Create;
+    destructor Destroy; override;
+
+    procedure Update;
+
+    procedure beginMove(ShopID: integer);
+    procedure beginHighlight(ShopID: integer);
+
+    procedure endMove;
+    procedure endHighlight;
+
+    procedure Paint;
+
+    // Eigenschaften
+    property Canvas: TCanvas read FCanvas write FCanvas;
+    property Map: TBitmap read FMap write setMap;
+    property Width: integer read FWidth;
+    property Height: integer read FHeight;
+    property RectCanvas: TRect read FRectCanvas write FRectCanvas;
+    property RectMap: TRect read FRectMap write setRectMap;
+
+    property shopMoveID: integer read FShopMoveID;
+    property shopHighlightID: integer read FShopHighlightID;
+  end;
+
+implementation
+
+{****************** TPainter ******************}
+
+constructor TPainter.Create;
+begin
+  inherited Create;
+
+  FMap := TBitmap.Create;
+  FMapShops := TBitmap.Create;
+  FShopMoveID := -1;
+  FShopHighlightID := -1;
+  FCanvas := nil;
+
+  FRectCanvas := Rect(0,0,0,0);
+  FRectMap := Rect(0,0,0,0);
+end;
+
+destructor TPainter.Destroy;
+begin
+  FMapShops.Free;
+  FMap.Free;
+
+  inherited Destroy;
+end;
+
+procedure TPainter.updateMapShops;
+var i: integer;
+begin
+  //FCanvas.CopyRect(FRectCanvas,FMap.Canvas,FRectMap);
+  FMapShops.Width := FMap.Width;
+  FMapShops.Height := FMap.Height;
+
+  FMapShops.Canvas.CopyRect(FRectMap,FMap.Canvas,FRectMap);
+
+  for i := 0 to Project^.Shops.Count-1 do begin
+    if FShopMoveID = Project^.Shops[i].ID then continue;
+    if FShopHighlightID = Project^.Shops[i].ID then continue;
+    
+    paintShop(false,FMapShops.Canvas,Project^.Shops[i]);
+  end;
+end;
+
+procedure TPainter.beginMove(ShopID: integer);
+begin
+  FShopMoveID := ShopID;
+  updateMapShops;
+end;
+
+procedure TPainter.endMove;
+begin
+  FShopMoveID := -1;
+  updateMapShops;
+end;
+
+procedure TPainter.beginHighlight(ShopID: integer);
+begin
+  FShopHighlightID := ShopID;
+  updateMapShops;
+end;
+
+procedure TPainter.endHighlight;
+begin
+  FShopHighlightID := -1;
+  updateMapShops;
+end;
+
+
+procedure TPainter.Update;
+begin
+  updateMapShops;
+end;
+
+procedure TPainter.setRectMap(ARect: TRect);
+begin
+{  FRectMap := Rect(
+    FRectCanvas.Left + ARect.Left,
+    FRectCanvas.Top + ARect.Top,
+    ARect.Right,
+    ARect.Bottom
+  );}
+  FRectMap := ARect;
+end;
+
+procedure TPainter.setMap(Map: TBitmap);
+begin
+  // !!! Das is ne Kopie, Speichern sparen und referenzieren
+  FMap.Assign(Map);
+end;
+
+function TPainter.getMidColor(Color1, Color2: TColor; perCent: integer): TColor;
+begin
+  Result := TColor(
+    RGB(
+      ( GetRValue(ColorToRGB(Color1))*perCent + GetRValue(ColorToRGB(Color2))*(100-perCent) ) div 100,
+      ( GetGValue(ColorToRGB(Color1))*perCent + GetGValue(ColorToRGB(Color2))*(100-perCent) ) div 100,
+      ( GetBValue(ColorToRGB(Color1))*perCent + GetBValue(ColorToRGB(Color2))*(100-perCent) ) div 100
+    )
+  );
+end;
+
+procedure TPainter.Paint;
+var ARect, ARectRelative, ARectMap: TRect;
+    tmpBitmap: TBitmap;
+    AShop: TShop;
+begin
+// Windows.InvalidateRect(FCanvas.Handle,)
+
+// http://groups.google.com/group/de.comp.lang.delphi.misc/browse_thread/thread/3f50849bfe827bc/a1cea1af55ca5861?lnk=st&q=delphi+flackern+verhindern&rnum=1&hl=de#a1cea1af55ca5861
+// http://groups.google.com/group/de.comp.lang.pascal.delphi/browse_thread/thread/dcffbce471fd28c6/5ac260f1fd33afd3?lnk=st&q=delphi+objekte+bewegen&rnum=1&hl=de#5ac260f1fd33afd3
+
+// Map in Regionen aufteilen (GENIAL!)
+// http://groups.google.com/group/de.comp.lang.delphi.misc/browse_thread/thread/13ee76713a85e34f/f8efbc6627a2632e?lnk=st&q=delphi+polygon+speichern&rnum=2&hl=de#f8efbc6627a2632e
+
+
+ // FCanvas.CopyRect(FRectCanvas,FMap.Canvas,FRectMap);
+
+  if (FShopMoveID >= 0) or (FShopHighlightID >= 0) then begin
+    // FEHLERBEHANDLUNG
+    //Windows.InvalidateRect(FCanvas.Handle,@Rect,false);
+//    tmpCanvas := FMapShops.Canvas;
+    if (FShopMoveID >= 0) then AShop := Project^.Shops.byID(FShopMoveID)
+    else AShop := Project^.Shops.byID(FShopHighlightID);
+
+    ARectRelative := AShop.getRect(true,SHOP_PAINTER_OFFSET);
+    ARect := AShop.getRect(false,SHOP_PAINTER_OFFSET);
+
+    ARect := Rect(
+      ARect.Left - FRectMap.Left + FRectCanvas.Left,
+      ARect.Top - FRectMap.Top + FRectCanvas.Top,
+      ARect.Right - FRectMap.Left + FRectCanvas.Left,
+      ARect.Bottom - FRectMap.Top + FRectCanvas.Top
+    );
+
+    ARectMap := Rect(
+      ARect.Left + FRectMap.Left - FRectCanvas.Left,
+      ARect.Top + FRectMap.Top - FRectCanvas.Top,
+      ARect.Right + FRectMap.Left - FRectCanvas.Left,
+      ARect.Bottom + FRectMap.Top - FRectCanvas.Top
+    );
+
+//    tmpBitmap.Canvas.CopyRect(ARect,FMapShops.Canvas,ARect);
+  //}
+ //   paintShop(tmpBitmap.Canvas,AShop);
+
+    tmpBitmap := TBitmap.Create;
+    tmpBitmap.Width := ARect.Right - ARect.Left;
+    tmpBitmap.Height := ARect.Bottom - ARect.Top;
+    tmpBitmap.Canvas.CopyRect(ARectRelative,FMapShops.Canvas,ARectMap);
+
+    paintShop(true,tmpBitmap.Canvas,AShop);
+    FCanvas.CopyRect(ARect,tmpBitmap.Canvas,ARectRelative);
+    FCanvas.TextOut(300,10,inttostr(FRectMap.Left));
+
+    tmpBitmap.Free;
+  end
+
+  // Alles zeichnen (Kopieren!)
+  else begin
+    FCanvas.CopyRect(FRectCanvas,FMapShops.Canvas,FRectMap);
+    FCanvas.TextOut(300,10,inttostr(FRectMap.Left));
+  end;
+end;
+
+
+procedure TPainter.paintShop(Relative: Boolean; const ACanvas: TCanvas; Shop: TShop);
+var i: integer;
+    Caption: string;
+    RectPoints: TFourPoints;
+begin
+  if ACanvas.Brush.Style <> bsSolid then ACanvas.Brush.Style := bsBDiagonal;
+
+  // Farben/Text festlegen
+  if (FShopHighlightID = Shop.ID) or (FShopMoveID = Shop.ID { Shop.isHighlighted or Shop.isSelected}) then begin
+    if not (Shop.Owner is TCustomer) then Caption := '(kein Kunde)'
+    else Caption := Shop.Owner.Lastname;
+
+    ACanvas.Pen.Color := COLOR_SHOP_SELECTION_BORDER;
+    ACanvas.Brush.Color := getMidColor(COLOR_SHOP_SELECTION,clWhite,20);
+  end
+
+  // Kein Besitzer (Rot!)
+  else if not (Shop.Owner is TCustomer) then begin
+    Caption := '(kein Kunde)';
+    ACanvas.Pen.Color := COLOR_SHOP_NOCUSTOMER;
+    ACanvas.Brush.Color := getMidColor(COLOR_SHOP_NOCUSTOMER,clWhite,20);
+  end
+
+  // Normal zeichnen
+  else begin
+    Caption := Shop.Owner.Lastname;
+    ACanvas.Pen.Color := Shop.ColorBorder;
+    ACanvas.Brush.Color := Shop.Color;
+  end;
+
+  // Rechteck zeichnen
+  RectPoints := Shop.getPoints(Relative,SHOP_PAINTER_OFFSET);
+  ACanvas.Polygon(RectPoints);
+
+  // Anfasser zeichnen
+  if (FShopHighlightID = Shop.ID) or (FShopMoveID = Shop.ID {Shop.isHighlighted or Shop.isSelected}) then begin
+    for i := 0 to Length(RectPoints)-1 do begin
+      //ACanvas.Brush.Style := bsClear;
+      ACanvas.Brush.Color := COLOR_SHOP_SELECTION_BORDER;
+      ACanvas.Pen.Color := COLOR_SHOP_SELECTION_BORDER;
+      ACanvas.Ellipse(
+        RectPoints[i].X-ROTATE_POINT_RADIUS, RectPoints[i].Y-ROTATE_POINT_RADIUS,
+        RectPoints[i].X+ROTATE_POINT_RADIUS, RectPoints[i].Y+ROTATE_POINT_RADIUS
+      );
+    end;
+  end;
+
+  // Titeltext zeichnen
+  ACanvas.TextOut(Shop.X - Canvas.TextWidth(Caption) div 2, Shop.Y - Canvas.TextHeight(Caption) div 2, inttostr(RectPoints[0].X));
+end;
+
+end.
